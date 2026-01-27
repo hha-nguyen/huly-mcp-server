@@ -285,13 +285,10 @@ class HulyClient {
       }
 
       const createMessage = {
-        method: 'addCollection',
+        method: 'createDoc',
         params: [
           'tracker:class:Issue',
           spaceId,
-          spaceId,
-          'tracker:class:Project',
-          'issues',
           {
             title: issue.title,
             description: issue.description || '',
@@ -300,6 +297,10 @@ class HulyClient {
             status: project.defaultIssueStatus || 'tracker:status:Backlog',
             number: sequence,
             identifier: identifier,
+            space: spaceId,
+            attachedTo: spaceId,
+            attachedToClass: 'tracker:class:Project',
+            collection: 'issues',
             assignee: null,
             component: null,
             estimation: 0,
