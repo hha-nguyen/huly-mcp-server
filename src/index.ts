@@ -358,8 +358,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   if (!hulyClient) {
     const fs = await import('fs');
     const path = await import('path');
+    const { fileURLToPath } = await import('url');
     
-    const envPath = path.join(process.cwd(), '.env');
+    const __filename = fileURLToPath(import.meta.url);
+    const __dirname = path.dirname(__filename);
+    const envPath = path.join(__dirname, '..', '.env');
+    
     if (fs.existsSync(envPath)) {
       const envContent = fs.readFileSync(envPath, 'utf-8');
       envContent.split('\n').forEach((line) => {
@@ -367,8 +371,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         if (trimmed && !trimmed.startsWith('#')) {
           const [key, ...valueParts] = trimmed.split('=');
           if (key && valueParts.length > 0) {
-            const value = valueParts.join('=').replace(/^["']|["']$/g, '');
-            if (!process.env[key]) {
+            const value = valueParts.join('=').replace(/^["']|["']$/g, '').trim();
+            if (key && value) {
               process.env[key] = value;
             }
           }
