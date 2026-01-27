@@ -356,6 +356,26 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   const { name, arguments: args } = request.params;
 
   if (!hulyClient) {
+    const fs = await import('fs');
+    const path = await import('path');
+    
+    const envPath = path.join(process.cwd(), '.env');
+    if (fs.existsSync(envPath)) {
+      const envContent = fs.readFileSync(envPath, 'utf-8');
+      envContent.split('\n').forEach((line) => {
+        const trimmed = line.trim();
+        if (trimmed && !trimmed.startsWith('#')) {
+          const [key, ...valueParts] = trimmed.split('=');
+          if (key && valueParts.length > 0) {
+            const value = valueParts.join('=').replace(/^["']|["']$/g, '');
+            if (!process.env[key]) {
+              process.env[key] = value;
+            }
+          }
+        }
+      });
+    }
+
     const config: HulyConfig = {
       url: process.env.HULY_URL || '',
       email: process.env.HULY_EMAIL || '',
