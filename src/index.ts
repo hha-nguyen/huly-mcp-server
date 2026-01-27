@@ -58,9 +58,8 @@ class HulyClient {
     const loginPayload = {
       method: 'login',
       params: {
-        user: this.config.email,
-        password: this.config.password,
-        extra: { mode: 'token' }
+        email: this.config.email,
+        password: this.config.password
       }
     };
     
@@ -71,7 +70,7 @@ class HulyClient {
       throw new Error(`Login failed: ${JSON.stringify(loginResponse.error)}`);
     }
     
-    const loginResult = loginResponse.result;
+    const loginResult = loginResponse.result as { token?: string; account?: string } | undefined;
     if (!loginResult?.token) {
       throw new Error(`No token in login response: ${JSON.stringify(loginResponse)}`);
     }
@@ -80,21 +79,20 @@ class HulyClient {
     const selectPayload = {
       method: 'selectWorkspace',
       params: {
-        workspace: workspaceName,
-        kind: 'external',
-        token: loginResult.token
+        workspaceUrl: workspaceName,
+        kind: 'external'
       }
     };
     
     console.error(`Selecting workspace: ${workspaceName}`);
-    const selectResponse = await this.httpPost(accountUrl, selectPayload);
+    const selectResponse = await this.httpPost(accountUrl, selectPayload, loginResult.token);
     console.error('Select workspace response:', JSON.stringify(selectResponse).substring(0, 200));
     
     if (selectResponse.error) {
       throw new Error(`Workspace selection failed: ${JSON.stringify(selectResponse.error)}`);
     }
     
-    const wsToken = selectResponse.result?.token as string | undefined;
+    const wsToken = (selectResponse.result as { token?: string } | undefined)?.token;
     if (!wsToken || typeof wsToken !== 'string') {
       throw new Error(`No workspace token in response: ${JSON.stringify(selectResponse)}`);
     }
@@ -102,10 +100,15 @@ class HulyClient {
     return wsToken;
   }
 
-  private async httpPost(url: string, body: Record<string, unknown>): Promise<{ result?: Record<string, unknown>; error?: Record<string, unknown> }> {
+  private async httpPost(url: string, body: Record<string, unknown>, token?: string): Promise<{ result?: Record<string, unknown>; error?: Record<string, unknown> }> {
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+    
     const response = await fetch(url, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers,
       body: JSON.stringify(body),
     });
     
