@@ -30,6 +30,7 @@ class HulyClient {
   private connected: boolean = false;
   private projectKindCache: Map<string, string> = new Map();
   private projectSpaceCache: Map<string, string> = new Map();
+  private token: string | null = null;
 
   constructor(config: HulyConfig) {
     this.config = config;
@@ -40,118 +41,126 @@ class HulyClient {
       return;
     }
 
-    const wsUrlFromEnv = process.env.HULY_WS_URL;
-    const baseUrl = this.config.url.replace('https://', '').replace('http://', '').replace(/\/$/, '');
+    console.error('Getting workspace token...');
+    const token = await this.getWorkspaceToken();
+    this.token = token;
+    console.error('Token obtained, connecting to WebSocket...');
     
-    const urlsToTry = wsUrlFromEnv ? [wsUrlFromEnv] : [
-      `wss://${baseUrl}/_transactor`,
-      `wss://${baseUrl}/_collaborator`,
-      `wss://${baseUrl}`,
-      `wss://${baseUrl}/ws`,
-    ];
-
-    let lastError: Error | null = null;
-    
-    for (const wsUrl of urlsToTry) {
-      try {
-        console.error(`Trying WebSocket URL: ${wsUrl}`);
-        await this.tryConnect(wsUrl);
-        return;
-      } catch (error) {
-        console.error(`Failed to connect to ${wsUrl}:`, error instanceof Error ? error.message : String(error));
-        lastError = error instanceof Error ? error : new Error(String(error));
-      }
-    }
-    
-    throw lastError || new Error('Failed to connect to any WebSocket endpoint');
+    await this.connectWithToken(token);
   }
 
-  private async tryConnect(wsUrl: string): Promise<void> {
+  private async getWorkspaceToken(): Promise<string> {
+    const baseUrl = this.config.url.replace(/\/$/, '');
+    const accountUrl = `${baseUrl}/_accounts`;
+    
+    console.error(`Authenticating via: ${accountUrl}`);
+    
+    const loginPayload = {
+      method: 'login',
+      params: {
+        user: this.config.email,
+        password: this.config.password,
+        extra: { mode: 'token' }
+      }
+    };
+    
+    const loginResponse = await this.httpPost(accountUrl, loginPayload);
+    console.error('Login response:', JSON.stringify(loginResponse).substring(0, 200));
+    
+    if (loginResponse.error) {
+      throw new Error(`Login failed: ${JSON.stringify(loginResponse.error)}`);
+    }
+    
+    const loginResult = loginResponse.result;
+    if (!loginResult?.token) {
+      throw new Error(`No token in login response: ${JSON.stringify(loginResponse)}`);
+    }
+    
+    const workspaceName = this.config.workspace || 'Teaser Software';
+    const selectPayload = {
+      method: 'selectWorkspace',
+      params: {
+        workspace: workspaceName,
+        kind: 'external',
+        token: loginResult.token
+      }
+    };
+    
+    console.error(`Selecting workspace: ${workspaceName}`);
+    const selectResponse = await this.httpPost(accountUrl, selectPayload);
+    console.error('Select workspace response:', JSON.stringify(selectResponse).substring(0, 200));
+    
+    if (selectResponse.error) {
+      throw new Error(`Workspace selection failed: ${JSON.stringify(selectResponse.error)}`);
+    }
+    
+    const wsToken = selectResponse.result?.token;
+    if (!wsToken) {
+      throw new Error(`No workspace token in response: ${JSON.stringify(selectResponse)}`);
+    }
+    
+    return wsToken;
+  }
+
+  private async httpPost(url: string, body: Record<string, unknown>): Promise<{ result?: Record<string, unknown>; error?: Record<string, unknown> }> {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    
+    const text = await response.text();
+    try {
+      return JSON.parse(text);
+    } catch {
+      throw new Error(`Invalid JSON response: ${text.substring(0, 200)}`);
+    }
+  }
+
+  private async connectWithToken(token: string): Promise<void> {
+    const baseUrl = this.config.url.replace('https://', '').replace('http://', '').replace(/\/$/, '');
+    const wsUrl = `wss://${baseUrl}/${token}`;
+    
+    console.error(`Connecting to WebSocket: ${wsUrl.substring(0, 50)}...`);
+    
     return new Promise((resolve, reject) => {
       const timeoutId = setTimeout(() => {
         if (this.ws) {
           this.ws.close();
           this.ws = null;
         }
-        reject(new Error(`Connection timeout for ${wsUrl}`));
-      }, 10000);
+        reject(new Error('WebSocket connection timeout'));
+      }, 15000);
 
       this.ws = new WebSocket(wsUrl);
       
-      this.ws.on('open', async () => {
+      this.ws.on('open', () => {
         clearTimeout(timeoutId);
-        console.error(`WebSocket connected to ${wsUrl}, authenticating...`);
-        try {
-          await this.authenticate();
-          this.connected = true;
-          console.error('Authentication successful');
-          resolve();
-        } catch (error) {
-          console.error('Authentication failed:', error);
-          this.ws?.close();
-          this.ws = null;
-          reject(error);
-        }
+        this.connected = true;
+        console.error('WebSocket connected successfully');
+        resolve();
       });
 
-      this.ws.on('error', (error: Error & { code?: string; statusCode?: number }) => {
+      this.ws.on('error', (error: Error) => {
         clearTimeout(timeoutId);
         this.connected = false;
         this.ws = null;
         const errorMsg = error instanceof Error ? error.message : String(error);
+        console.error('WebSocket error:', errorMsg);
         reject(new Error(`WebSocket error: ${errorMsg}`));
       });
 
       this.ws.on('close', (code, reason) => {
         clearTimeout(timeoutId);
         this.connected = false;
-        const reasonStr = reason?.toString() || '';
-        console.error(`WebSocket closed: code=${code}, reason=${reasonStr}`);
+        console.error(`WebSocket closed: ${code} ${reason?.toString() || ''}`);
       });
       
       this.ws.on('unexpected-response', (request, response) => {
         clearTimeout(timeoutId);
         this.connected = false;
         this.ws = null;
-        const statusCode = response.statusCode;
-        reject(new Error(`HTTP ${statusCode} instead of WebSocket upgrade`));
-      });
-    });
-  }
-
-  private async authenticate(): Promise<void> {
-    return new Promise((resolve, reject) => {
-      if (!this.ws) {
-        reject(new Error('WebSocket not connected'));
-        return;
-      }
-
-      const authMessage = {
-        method: 'account:login',
-        params: {
-          email: this.config.email,
-          password: this.config.password,
-        },
-      };
-
-      this.ws.send(JSON.stringify(authMessage));
-
-      const timeout = setTimeout(() => {
-        reject(new Error('Authentication timeout'));
-      }, 10000);
-
-      this.ws.once('message', (data: WebSocket.Data) => {
-        clearTimeout(timeout);
-        try {
-          const response = JSON.parse(data.toString());
-          if (response.result) {
-            resolve();
-          } else {
-            reject(new Error('Authentication failed'));
-          }
-        } catch (error) {
-          reject(error);
-        }
+        reject(new Error(`HTTP ${response.statusCode} instead of WebSocket`));
       });
     });
   }
