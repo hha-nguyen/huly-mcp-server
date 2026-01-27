@@ -40,18 +40,46 @@ class HulyClient {
       return;
     }
 
-    return new Promise((resolve, reject) => {
-      let wsUrl = this.config.url.replace('https://', 'wss://').replace('http://', 'ws://');
-      if (!wsUrl.endsWith('/ws')) {
-        wsUrl += '/ws';
+    const baseUrl = this.config.url.replace('https://', '').replace('http://', '').replace(/\/$/, '');
+    
+    const urlsToTry = [
+      `wss://${baseUrl}`,
+      `wss://transactor.${baseUrl}`,
+      `wss://${baseUrl}/ws`,
+      `wss://${baseUrl}:3333`,
+    ];
+
+    let lastError: Error | null = null;
+    
+    for (const wsUrl of urlsToTry) {
+      try {
+        console.error(`Trying WebSocket URL: ${wsUrl}`);
+        await this.tryConnect(wsUrl);
+        return;
+      } catch (error) {
+        console.error(`Failed to connect to ${wsUrl}:`, error instanceof Error ? error.message : String(error));
+        lastError = error instanceof Error ? error : new Error(String(error));
       }
-      
-      console.error(`Connecting to WebSocket: ${wsUrl.replace(/\/\/[^:]+:[^@]+@/, '//***:***@')}`);
-      
+    }
+    
+    throw lastError || new Error('Failed to connect to any WebSocket endpoint');
+  }
+
+  private async tryConnect(wsUrl: string): Promise<void> {
+    return new Promise((resolve, reject) => {
+      const timeoutId = setTimeout(() => {
+        if (this.ws) {
+          this.ws.close();
+          this.ws = null;
+        }
+        reject(new Error(`Connection timeout for ${wsUrl}`));
+      }, 10000);
+
       this.ws = new WebSocket(wsUrl);
       
       this.ws.on('open', async () => {
-        console.error('WebSocket connected, authenticating...');
+        clearTimeout(timeoutId);
+        console.error(`WebSocket connected to ${wsUrl}, authenticating...`);
         try {
           await this.authenticate();
           this.connected = true;
@@ -59,44 +87,33 @@ class HulyClient {
           resolve();
         } catch (error) {
           console.error('Authentication failed:', error);
+          this.ws?.close();
+          this.ws = null;
           reject(error);
         }
       });
 
       this.ws.on('error', (error: Error & { code?: string; statusCode?: number }) => {
+        clearTimeout(timeoutId);
         this.connected = false;
         this.ws = null;
-        let errorMsg = error instanceof Error ? error.message : String(error);
-        
-        if (error.code === 'ECONNREFUSED') {
-          errorMsg = `Connection refused. Check if the WebSocket URL is correct: ${wsUrl}`;
-        } else if (error.statusCode === 200 || errorMsg.includes('200')) {
-          errorMsg = `Received HTTP 200 instead of WebSocket upgrade. The WebSocket endpoint may be incorrect or the server doesn't support WebSocket at this URL: ${wsUrl}`;
-        }
-        
-        console.error('WebSocket error:', errorMsg, error);
-        reject(new Error(`WebSocket connection error: ${errorMsg}`));
+        const errorMsg = error instanceof Error ? error.message : String(error);
+        reject(new Error(`WebSocket error: ${errorMsg}`));
       });
 
       this.ws.on('close', (code, reason) => {
+        clearTimeout(timeoutId);
         this.connected = false;
         const reasonStr = reason?.toString() || '';
         console.error(`WebSocket closed: code=${code}, reason=${reasonStr}`);
-        if (code === 1006 && !this.connected) {
-          reject(new Error(`WebSocket connection closed abnormally (code ${code}). This may indicate the WebSocket endpoint is incorrect or the server rejected the connection.`));
-        }
       });
       
       this.ws.on('unexpected-response', (request, response) => {
+        clearTimeout(timeoutId);
         this.connected = false;
         this.ws = null;
         const statusCode = response.statusCode;
-        let data = '';
-        response.on('data', (chunk) => { data += chunk.toString(); });
-        response.on('end', () => {
-          console.error(`Unexpected HTTP response: ${statusCode}`, data);
-          reject(new Error(`WebSocket handshake failed: Received HTTP ${statusCode} instead of WebSocket upgrade. Response: ${data.substring(0, 200)}`));
-        });
+        reject(new Error(`HTTP ${statusCode} instead of WebSocket upgrade`));
       });
     });
   }
