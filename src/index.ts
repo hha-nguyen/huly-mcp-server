@@ -63,17 +63,40 @@ class HulyClient {
         }
       });
 
-      this.ws.on('error', (error) => {
+      this.ws.on('error', (error: Error & { code?: string; statusCode?: number }) => {
         this.connected = false;
         this.ws = null;
-        const errorMsg = error instanceof Error ? error.message : String(error);
-        console.error('WebSocket error:', errorMsg);
+        let errorMsg = error instanceof Error ? error.message : String(error);
+        
+        if (error.code === 'ECONNREFUSED') {
+          errorMsg = `Connection refused. Check if the WebSocket URL is correct: ${wsUrl}`;
+        } else if (error.statusCode === 200 || errorMsg.includes('200')) {
+          errorMsg = `Received HTTP 200 instead of WebSocket upgrade. The WebSocket endpoint may be incorrect or the server doesn't support WebSocket at this URL: ${wsUrl}`;
+        }
+        
+        console.error('WebSocket error:', errorMsg, error);
         reject(new Error(`WebSocket connection error: ${errorMsg}`));
       });
 
       this.ws.on('close', (code, reason) => {
         this.connected = false;
-        console.error(`WebSocket closed: ${code} ${reason?.toString() || ''}`);
+        const reasonStr = reason?.toString() || '';
+        console.error(`WebSocket closed: code=${code}, reason=${reasonStr}`);
+        if (code === 1006 && !this.connected) {
+          reject(new Error(`WebSocket connection closed abnormally (code ${code}). This may indicate the WebSocket endpoint is incorrect or the server rejected the connection.`));
+        }
+      });
+      
+      this.ws.on('unexpected-response', (request, response) => {
+        this.connected = false;
+        this.ws = null;
+        const statusCode = response.statusCode;
+        let data = '';
+        response.on('data', (chunk) => { data += chunk.toString(); });
+        response.on('end', () => {
+          console.error(`Unexpected HTTP response: ${statusCode}`, data);
+          reject(new Error(`WebSocket handshake failed: Received HTTP ${statusCode} instead of WebSocket upgrade. Response: ${data.substring(0, 200)}`));
+        });
       });
     });
   }
