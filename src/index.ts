@@ -217,19 +217,21 @@ class HulyClient {
       }
 
       const createMessage = {
-        method: 'tracker:create:Issue',
-        params: {
-          space: spaceId,
-          data: {
+        method: 'create',
+        params: [
+          'tracker:class:Issue',
+          {
             title: issue.title,
             description: issue.description || '',
             priority: this.mapPriority(issue.priority || 'low'),
             kind: kindId,
-            attachedToClass: 'tracker:class:Issue',
-            collection: 'subIssues',
+            space: spaceId,
+            attachedTo: spaceId,
+            attachedToClass: 'tracker:class:Project',
+            collection: 'issues',
             status: 'tracker:status:Backlog',
           },
-        },
+        ],
       };
 
       this.ws.send(JSON.stringify(createMessage));
@@ -242,14 +244,19 @@ class HulyClient {
         clearTimeout(timeout);
         try {
           const response = JSON.parse(data.toString());
+          console.error('Create issue response:', JSON.stringify(response).substring(0, 500));
           if (response.result) {
+            const result = response.result;
+            const issue = (result.value && Array.isArray(result.value) ? result.value[0] : result) || result;
             resolve({
-              id: response.result.id,
-              number: response.result.number,
-              identifier: response.result.identifier,
+              id: issue._id || issue.id || '',
+              number: issue.number || 0,
+              identifier: issue.identifier || '',
             });
+          } else if (response.error) {
+            reject(new Error(`API error: ${JSON.stringify(response.error)}`));
           } else {
-            reject(new Error(response.error || 'Failed to create issue'));
+            reject(new Error('Failed to create issue'));
           }
         } catch (error) {
           reject(error);
