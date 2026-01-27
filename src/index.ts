@@ -41,16 +41,24 @@ class HulyClient {
     }
 
     return new Promise((resolve, reject) => {
-      const wsUrl = this.config.url.replace('https://', 'wss://').replace('http://', 'ws://') + '/ws';
+      let wsUrl = this.config.url.replace('https://', 'wss://').replace('http://', 'ws://');
+      if (!wsUrl.endsWith('/ws')) {
+        wsUrl += '/ws';
+      }
+      
+      console.error(`Connecting to WebSocket: ${wsUrl.replace(/\/\/[^:]+:[^@]+@/, '//***:***@')}`);
       
       this.ws = new WebSocket(wsUrl);
       
       this.ws.on('open', async () => {
+        console.error('WebSocket connected, authenticating...');
         try {
           await this.authenticate();
           this.connected = true;
+          console.error('Authentication successful');
           resolve();
         } catch (error) {
+          console.error('Authentication failed:', error);
           reject(error);
         }
       });
@@ -58,11 +66,14 @@ class HulyClient {
       this.ws.on('error', (error) => {
         this.connected = false;
         this.ws = null;
-        reject(new Error(`WebSocket connection error: ${error instanceof Error ? error.message : String(error)}`));
+        const errorMsg = error instanceof Error ? error.message : String(error);
+        console.error('WebSocket error:', errorMsg);
+        reject(new Error(`WebSocket connection error: ${errorMsg}`));
       });
 
-      this.ws.on('close', () => {
+      this.ws.on('close', (code, reason) => {
         this.connected = false;
+        console.error(`WebSocket closed: ${code} ${reason?.toString() || ''}`);
       });
     });
   }
@@ -370,9 +381,15 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       envContent.split('\n').forEach((line) => {
         const trimmed = line.trim();
         if (trimmed && !trimmed.startsWith('#')) {
-          const [key, ...valueParts] = trimmed.split('=');
-          if (key && valueParts.length > 0) {
-            const value = valueParts.join('=').replace(/^["']|["']$/g, '').trim();
+          const equalIndex = trimmed.indexOf('=');
+          if (equalIndex > 0) {
+            const key = trimmed.substring(0, equalIndex).trim();
+            let value = trimmed.substring(equalIndex + 1).trim();
+            if (value.startsWith('"') && value.endsWith('"')) {
+              value = value.slice(1, -1);
+            } else if (value.startsWith("'") && value.endsWith("'")) {
+              value = value.slice(1, -1);
+            }
             if (key && value) {
               process.env[key] = value;
             }
