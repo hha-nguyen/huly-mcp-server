@@ -94,8 +94,8 @@ class HulyClient {
       throw new Error(`Workspace selection failed: ${JSON.stringify(selectResponse.error)}`);
     }
     
-    const wsToken = selectResponse.result?.token;
-    if (!wsToken) {
+    const wsToken = selectResponse.result?.token as string | undefined;
+    if (!wsToken || typeof wsToken !== 'string') {
       throw new Error(`No workspace token in response: ${JSON.stringify(selectResponse)}`);
     }
     
