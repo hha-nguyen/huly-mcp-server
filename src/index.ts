@@ -202,6 +202,65 @@ class HulyClient {
     throw new Error(`Could not find task type for project: ${projectName}. Please create one issue manually first.`);
   }
 
+  private generateId(): string {
+    return `${Date.now()}-${Math.random().toString(36).substring(2, 15)}`;
+  }
+
+  private async getProject(spaceId: string): Promise<{ identifier: string; defaultIssueStatus?: string; name?: string } | null> {
+    const projects = await this.listProjects();
+    const project = projects.find((p) => p._id === spaceId);
+    if (!project) {
+      return null;
+    }
+    return {
+      identifier: (project as { identifier?: string }).identifier || '',
+      defaultIssueStatus: (project as { defaultIssueStatus?: string }).defaultIssueStatus,
+      name: (project as { name?: string }).name,
+    };
+  }
+
+  private async getNextIssueNumber(spaceId: string): Promise<number> {
+    return new Promise((resolve, reject) => {
+      if (!this.ws) {
+        reject(new Error('WebSocket not connected'));
+        return;
+      }
+
+      const updateMessage = {
+        method: 'updateDoc',
+        params: [
+          'tracker:class:Project',
+          'core:class:Space',
+          spaceId,
+          { $inc: { sequence: 1 } },
+          true,
+        ],
+      };
+
+      this.ws.send(JSON.stringify(updateMessage));
+
+      const timeout = setTimeout(() => {
+        reject(new Error('Get next issue number timeout'));
+      }, 10000);
+
+      this.ws.once('message', (data: WebSocket.Data) => {
+        clearTimeout(timeout);
+        try {
+          const response = JSON.parse(data.toString());
+          if (response.result) {
+            const result = response.result;
+            const sequence = (result.object || result).sequence;
+            resolve(sequence || 1);
+          } else {
+            resolve(1);
+          }
+        } catch (error) {
+          resolve(1);
+        }
+      });
+    });
+  }
+
   async createIssue(issue: HulyIssue): Promise<{ id: string; number: number; identifier: string }> {
     if (!this.connected) {
       await this.connect();
@@ -209,6 +268,15 @@ class HulyClient {
 
     const spaceId = await this.getProjectSpaceId(issue.project);
     const kindId = await this.getProjectKindId(issue.project);
+    const project = await this.getProject(spaceId);
+    
+    if (!project) {
+      throw new Error('Project not found');
+    }
+
+    const issueId = this.generateId();
+    const sequence = await this.getNextIssueNumber(spaceId);
+    const identifier = `${project.identifier}-${sequence}`;
 
     return new Promise((resolve, reject) => {
       if (!this.ws) {
@@ -217,20 +285,33 @@ class HulyClient {
       }
 
       const createMessage = {
-        method: 'create',
+        method: 'addCollection',
         params: [
           'tracker:class:Issue',
+          spaceId,
+          spaceId,
+          'tracker:class:Project',
+          'issues',
           {
             title: issue.title,
             description: issue.description || '',
             priority: this.mapPriority(issue.priority || 'low'),
             kind: kindId,
-            space: spaceId,
-            attachedTo: spaceId,
-            attachedToClass: 'tracker:class:Project',
-            collection: 'issues',
-            status: 'tracker:status:Backlog',
+            status: project.defaultIssueStatus || 'tracker:status:Backlog',
+            number: sequence,
+            identifier: identifier,
+            assignee: null,
+            component: null,
+            estimation: 0,
+            remainingTime: 0,
+            reportedTime: 0,
+            reports: 0,
+            subIssues: 0,
+            parents: [],
+            childInfo: [],
+            dueDate: null,
           },
+          issueId,
         ],
       };
 
@@ -245,18 +326,14 @@ class HulyClient {
         try {
           const response = JSON.parse(data.toString());
           console.error('Create issue response:', JSON.stringify(response).substring(0, 500));
-          if (response.result) {
-            const result = response.result;
-            const issue = (result.value && Array.isArray(result.value) ? result.value[0] : result) || result;
-            resolve({
-              id: issue._id || issue.id || '',
-              number: issue.number || 0,
-              identifier: issue.identifier || '',
-            });
-          } else if (response.error) {
+          if (response.error) {
             reject(new Error(`API error: ${JSON.stringify(response.error)}`));
           } else {
-            reject(new Error('Failed to create issue'));
+            resolve({
+              id: issueId,
+              number: sequence,
+              identifier: identifier,
+            });
           }
         } catch (error) {
           reject(error);
@@ -316,7 +393,7 @@ class HulyClient {
     });
   }
 
-  async listProjects(): Promise<Array<{ _id: string; name: string; identifier?: string }>> {
+  async listProjects(): Promise<Array<{ _id: string; name: string; identifier?: string; defaultIssueStatus?: string }>> {
     if (!this.connected) {
       await this.connect();
     }
