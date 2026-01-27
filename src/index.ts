@@ -71,14 +71,17 @@ class HulyClient {
       throw new Error(`Login failed: ${JSON.stringify(loginResponse.error)}`);
     }
     
-    const loginResult = loginResponse.result as { token?: string; account?: string } | undefined;
+    const loginResult = loginResponse.result as { token?: string; account?: string; socialId?: string } | undefined;
     if (!loginResult?.token) {
       throw new Error(`No token in login response: ${JSON.stringify(loginResponse)}`);
     }
     
-    if (loginResult.account) {
+    if (loginResult.socialId) {
+      this.accountId = loginResult.socialId;
+      console.error('Social ID (from login):', this.accountId);
+    } else if (loginResult.account) {
       this.accountId = loginResult.account;
-      console.error('Account ID:', this.accountId);
+      console.error('Account ID (from login):', this.accountId);
     }
     
     const workspaceName = this.config.workspace || 'Teaser Software';
@@ -98,9 +101,18 @@ class HulyClient {
       throw new Error(`Workspace selection failed: ${JSON.stringify(selectResponse.error)}`);
     }
     
-    const wsToken = (selectResponse.result as { token?: string } | undefined)?.token;
+    const selectResult = selectResponse.result as { token?: string; socialId?: string; account?: string } | undefined;
+    const wsToken = selectResult?.token;
     if (!wsToken || typeof wsToken !== 'string') {
       throw new Error(`No workspace token in response: ${JSON.stringify(selectResponse)}`);
+    }
+    
+    if (selectResult?.socialId) {
+      this.accountId = selectResult.socialId;
+      console.error('Social ID (from workspace):', this.accountId);
+    } else if (selectResult?.account) {
+      this.accountId = selectResult.account;
+      console.error('Account ID (from workspace):', this.accountId);
     }
     
     return wsToken;
