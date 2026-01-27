@@ -174,16 +174,16 @@ class HulyClient {
     }
 
     const projects = await this.listProjects();
-    const project = projects.find((p: { name: string; id: string }) => 
-      p.name === projectName || p.id === projectName
+    const project = projects.find((p) => 
+      p.name === projectName || p._id === projectName || p.identifier === projectName
     );
 
     if (!project) {
-      throw new Error(`Project not found: ${projectName}`);
+      throw new Error(`Project not found: ${projectName}. Available projects: ${projects.map(p => p.name).join(', ')}`);
     }
 
-    this.projectSpaceCache.set(projectName, project.id);
-    return project.id;
+    this.projectSpaceCache.set(projectName, project._id);
+    return project._id;
   }
 
   async getProjectKindId(projectName: string): Promise<string> {
@@ -258,7 +258,7 @@ class HulyClient {
     });
   }
 
-  async listIssues(spaceId?: string): Promise<Array<{ id: string; title: string; kind?: string }>> {
+  async listIssues(spaceId?: string): Promise<Array<{ _id: string; title: string; kind?: string; identifier?: string }>> {
     if (!this.connected) {
       await this.connect();
     }
@@ -269,9 +269,10 @@ class HulyClient {
         return;
       }
 
+      const query = spaceId ? { space: spaceId } : {};
       const listMessage = {
-        method: 'tracker:query:Issue',
-        params: spaceId ? { space: spaceId } : {},
+        method: 'findAll',
+        params: ['tracker:class:Issue', query, { limit: 100 }],
       };
 
       this.ws.send(JSON.stringify(listMessage));
@@ -291,13 +292,13 @@ class HulyClient {
               resolve(result);
             } else if (result.docs && Array.isArray(result.docs)) {
               resolve(result.docs);
-            } else if (typeof result === 'object') {
-              resolve(Object.values(result) as Array<{ id: string; title: string; kind?: string }>);
             } else {
               reject(new Error(`Unexpected result format: ${JSON.stringify(result).substring(0, 200)}`));
             }
+          } else if (response.error) {
+            reject(new Error(`API error: ${JSON.stringify(response.error)}`));
           } else {
-            reject(new Error(response.error || 'Failed to list issues'));
+            reject(new Error('Failed to list issues'));
           }
         } catch (error) {
           reject(error);
@@ -306,7 +307,7 @@ class HulyClient {
     });
   }
 
-  async listProjects(): Promise<Array<{ id: string; name: string }>> {
+  async listProjects(): Promise<Array<{ _id: string; name: string; identifier?: string }>> {
     if (!this.connected) {
       await this.connect();
     }
@@ -318,8 +319,8 @@ class HulyClient {
       }
 
       const listMessage = {
-        method: 'tracker:query:Project',
-        params: {},
+        method: 'findAll',
+        params: ['tracker:class:Project', {}, {}],
       };
 
       this.ws.send(JSON.stringify(listMessage));
@@ -339,13 +340,13 @@ class HulyClient {
               resolve(result);
             } else if (result.docs && Array.isArray(result.docs)) {
               resolve(result.docs);
-            } else if (typeof result === 'object') {
-              resolve(Object.values(result) as Array<{ id: string; name: string }>);
             } else {
               reject(new Error(`Unexpected result format: ${JSON.stringify(result).substring(0, 200)}`));
             }
+          } else if (response.error) {
+            reject(new Error(`API error: ${JSON.stringify(response.error)}`));
           } else {
-            reject(new Error(response.error || 'Failed to list projects'));
+            reject(new Error('Failed to list projects'));
           }
         } catch (error) {
           reject(error);
@@ -517,7 +518,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           content: [
             {
               type: 'text',
-              text: `Found ${issues.length} issues:\n\n${issues.map((i) => `- ${i.id}: ${i.title}`).join('\n')}`,
+              text: `Found ${issues.length} issues:\n\n${issues.map((i) => `- ${i.identifier || i._id}: ${i.title}`).join('\n')}`,
             },
           ],
         };
@@ -529,7 +530,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           content: [
             {
               type: 'text',
-              text: `Found ${projects.length} projects:\n\n${projects.map((p) => `- ${p.id}: ${p.name}`).join('\n')}`,
+              text: `Found ${projects.length} projects:\n\n${projects.map((p) => `- ${p.identifier || p._id}: ${p.name}`).join('\n')}`,
             },
           ],
         };
