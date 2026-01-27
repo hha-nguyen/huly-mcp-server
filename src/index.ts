@@ -42,16 +42,12 @@ class HulyClient {
 
     const wsUrlFromEnv = process.env.HULY_WS_URL;
     const baseUrl = this.config.url.replace('https://', '').replace('http://', '').replace(/\/$/, '');
-    const domainParts = baseUrl.split('.');
-    const baseDomain = domainParts.length > 2 ? domainParts.slice(-2).join('.') : baseUrl;
     
     const urlsToTry = wsUrlFromEnv ? [wsUrlFromEnv] : [
-      `wss://transactor.${baseDomain}`,
-      `wss://api.${baseDomain}`,
+      `wss://${baseUrl}/_transactor`,
+      `wss://${baseUrl}/_collaborator`,
       `wss://${baseUrl}`,
       `wss://${baseUrl}/ws`,
-      `wss://${baseUrl}:3333`,
-      `wss://transactor.${baseUrl}`,
     ];
 
     let lastError: Error | null = null;
