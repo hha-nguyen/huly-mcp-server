@@ -57,7 +57,8 @@ class HulyClient {
 
       this.ws.on('error', (error) => {
         this.connected = false;
-        reject(error);
+        this.ws = null;
+        reject(new Error(`WebSocket connection error: ${error instanceof Error ? error.message : String(error)}`));
       });
 
       this.ws.on('close', () => {
@@ -448,11 +449,13 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         throw new Error(`Unknown tool: ${name}`);
     }
   } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    console.error('MCP Tool Error:', errorMessage);
     return {
       content: [
         {
           type: 'text',
-          text: `❌ Error: ${error instanceof Error ? error.message : String(error)}`,
+          text: `❌ Error: ${errorMessage}`,
         },
       ],
       isError: true,
