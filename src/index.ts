@@ -31,6 +31,7 @@ class HulyClient {
   private projectKindCache: Map<string, string> = new Map();
   private projectSpaceCache: Map<string, string> = new Map();
   private token: string | null = null;
+  private accountId: string | null = null;
 
   constructor(config: HulyConfig) {
     this.config = config;
@@ -73,6 +74,11 @@ class HulyClient {
     const loginResult = loginResponse.result as { token?: string; account?: string } | undefined;
     if (!loginResult?.token) {
       throw new Error(`No token in login response: ${JSON.stringify(loginResponse)}`);
+    }
+    
+    if (loginResult.account) {
+      this.accountId = loginResult.account;
+      console.error('Account ID:', this.accountId);
     }
     
     const workspaceName = this.config.workspace || 'Teaser Software';
@@ -284,38 +290,51 @@ class HulyClient {
         return;
       }
 
-      const createMessage = {
-        method: 'createDoc',
-        params: [
-          'tracker:class:Issue',
-          spaceId,
-          {
-            title: issue.title,
-            description: issue.description || '',
-            priority: this.mapPriority(issue.priority || 'low'),
-            kind: kindId,
-            status: project.defaultIssueStatus || 'tracker:status:Backlog',
-            number: sequence,
-            identifier: identifier,
-            space: spaceId,
-            attachedTo: spaceId,
-            attachedToClass: 'tracker:class:Project',
-            collection: 'issues',
-            assignee: null,
-            component: null,
-            estimation: 0,
-            remainingTime: 0,
-            reportedTime: 0,
-            reports: 0,
-            subIssues: 0,
-            parents: [],
-            childInfo: [],
-            dueDate: null,
-          },
-          issueId,
-        ],
+      const txId = this.generateId();
+      const now = Date.now();
+      
+      const transaction = {
+        _id: txId,
+        _class: 'core:class:TxCreateDoc',
+        space: 'core:space:Tx',
+        objectId: issueId,
+        objectClass: 'tracker:class:Issue',
+        objectSpace: spaceId,
+        modifiedOn: now,
+        modifiedBy: this.accountId || 'core:account:System',
+        createdBy: this.accountId || 'core:account:System',
+        createdOn: now,
+        attachedTo: spaceId,
+        attachedToClass: 'tracker:class:Project',
+        collection: 'issues',
+        attributes: {
+          title: issue.title,
+          description: issue.description || '',
+          priority: this.mapPriority(issue.priority || 'low'),
+          kind: kindId,
+          status: project.defaultIssueStatus || 'tracker:status:Backlog',
+          number: sequence,
+          identifier: identifier,
+          assignee: null,
+          component: null,
+          estimation: 0,
+          remainingTime: 0,
+          reportedTime: 0,
+          reports: 0,
+          subIssues: 0,
+          parents: [],
+          childInfo: [],
+          dueDate: null,
+          rank: '',
+        },
       };
 
+      const createMessage = {
+        method: 'tx',
+        params: [transaction],
+      };
+
+      console.error('Sending transaction:', JSON.stringify(createMessage).substring(0, 500));
       this.ws.send(JSON.stringify(createMessage));
 
       const timeout = setTimeout(() => {
