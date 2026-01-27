@@ -107,13 +107,11 @@ class HulyClient {
       throw new Error(`No workspace token in response: ${JSON.stringify(selectResponse)}`);
     }
     
-    if (selectResult?.socialId) {
+    if (selectResult?.socialId && !this.accountId) {
       this.accountId = selectResult.socialId;
       console.error('Social ID (from workspace):', this.accountId);
-    } else if (selectResult?.account) {
-      this.accountId = selectResult.account;
-      console.error('Account ID (from workspace):', this.accountId);
     }
+    console.error('Final account ID for transactions:', this.accountId);
     
     return wsToken;
   }
