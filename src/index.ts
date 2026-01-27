@@ -284,8 +284,18 @@ class HulyClient {
         clearTimeout(timeout);
         try {
           const response = JSON.parse(data.toString());
+          console.error('List issues response:', JSON.stringify(response).substring(0, 500));
           if (response.result) {
-            resolve(response.result);
+            const result = response.result;
+            if (Array.isArray(result)) {
+              resolve(result);
+            } else if (result.docs && Array.isArray(result.docs)) {
+              resolve(result.docs);
+            } else if (typeof result === 'object') {
+              resolve(Object.values(result) as Array<{ id: string; title: string; kind?: string }>);
+            } else {
+              reject(new Error(`Unexpected result format: ${JSON.stringify(result).substring(0, 200)}`));
+            }
           } else {
             reject(new Error(response.error || 'Failed to list issues'));
           }
@@ -322,8 +332,18 @@ class HulyClient {
         clearTimeout(timeout);
         try {
           const response = JSON.parse(data.toString());
+          console.error('List projects response:', JSON.stringify(response).substring(0, 500));
           if (response.result) {
-            resolve(response.result);
+            const result = response.result;
+            if (Array.isArray(result)) {
+              resolve(result);
+            } else if (result.docs && Array.isArray(result.docs)) {
+              resolve(result.docs);
+            } else if (typeof result === 'object') {
+              resolve(Object.values(result) as Array<{ id: string; name: string }>);
+            } else {
+              reject(new Error(`Unexpected result format: ${JSON.stringify(result).substring(0, 200)}`));
+            }
           } else {
             reject(new Error(response.error || 'Failed to list projects'));
           }
