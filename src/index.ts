@@ -290,6 +290,8 @@ class HulyClient {
             const result = response.result;
             if (Array.isArray(result)) {
               resolve(result);
+            } else if (result.value && Array.isArray(result.value)) {
+              resolve(result.value);
             } else if (result.docs && Array.isArray(result.docs)) {
               resolve(result.docs);
             } else {
@@ -338,6 +340,8 @@ class HulyClient {
             const result = response.result;
             if (Array.isArray(result)) {
               resolve(result);
+            } else if (result.value && Array.isArray(result.value)) {
+              resolve(result.value);
             } else if (result.docs && Array.isArray(result.docs)) {
               resolve(result.docs);
             } else {
